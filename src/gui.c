@@ -108,3 +108,79 @@ static void draw_meter(Rectangle area, float level, float from_hue, float to_hue
 	DrawRectangleRec(area, Fade(border, 0.5f));
 	DrawRectangle(area.x, area.y, area.width * level, area.height, shade(from_hue, to_hue, level));
 }
+
+static void draw_cpu(Rectangle box, const struct snapshot *snapshot, const struct history *history)
+{
+	Rectangle area = draw_box(box, TextFormat("cpu %.0f%%", snapshot->cpu_total));
+	float cores_width = fminf(area.width * 0.45f, 520);
+	Rectangle graph = { area.x, area.y, area.width - cores_width - PAD, area.height };
+	draw_graph(graph, history->cpu, 100, 120, 0);
+
+	int rows = fmaxf(1, area.height / ROW);
+	int columns = (snapshot->cpu_count + rows - 1) / rows;
+	float column_width = cores_width / columns;
+
+	for (int cpu = 0; cpu < snapshot->cpu_count; cpu++) {
+		float x = area.x + area.width - cores_width + (cpu / rows) * column_width;
+		float y = area.y + (cpu % rows) * ROW;
+		float usage = snapshot->cpu[cpu];
+		draw_meter((Rectangle){ x, y + 6, column_width - PAD, FONT - 10 }, usage / 100, 120, 0);
+		DrawText(TextFormat("%-3.0f", usage), x + column_width - PAD - 36, y, FONT, text);
+	}
+}
+
+static void draw_memory(Rectangle box, const struct snapshot *snapshot, const struct history *history)
+{
+	Rectangle area = draw_box(box, "memory");
+	float used = snapshot->mem_total ? (float)snapshot->mem_used / snapshot->mem_total : 0;
+
+	DrawText(TextFormat("used %s", human(snapshot->mem_used)), area.x, area.y, FONT, text);
+	const char *total = TextFormat("of %s", human(snapshot->mem_total));
+	DrawText(total, area.x + area.width - MeasureText(total, FONT), area.y, FONT, dim);
+	draw_meter((Rectangle){ area.x, area.y + ROW, area.width, 8 }, used, 120, 0);
+
+	Rectangle graph = { area.x, area.y + ROW + 16, area.width, area.height - ROW - 16 };
+	draw_graph(graph, history->mem, 100, 120, 0);
+}
+
+static void draw_series(Rectangle area, const char *name, const float *values, float max, float hue)
+{
+	DrawText(name, area.x, area.y, FONT, dim);
+	const char *current = TextFormat("%s/s", human(values[HISTORY - 1]));
+	DrawText(current, area.x + area.width - MeasureText(current, FONT), area.y, FONT, text);
+	draw_graph((Rectangle){ area.x, area.y + ROW, area.width, area.height - ROW }, values, max, hue, hue);
+}
+
+static void draw_traffic(Rectangle box, const char *name, const char *in_name, const float *in,
+			 const char *out_name, const float *out)
+{
+	Rectangle area = draw_box(box, name);
+	float max = fmaxf(fmaxf(peak(in), peak(out)), 1024);
+	float half = (area.height - PAD) / 2;
+
+	draw_series((Rectangle){ area.x, area.y, area.width, half }, in_name, in, max, 190);
+	draw_series((Rectangle){ area.x, area.y + half + PAD, area.width, half }, out_name, out, max, 290);
+}
+
+static void draw_processes(Rectangle box, const struct snapshot *snapshot)
+{
+	Rectangle area = draw_box(box, "processes");
+	float name_x = area.x + 90;
+	float meter_x = name_x + 210;
+	float percent_x = area.x + area.width - 70;
+
+	DrawText("pid", area.x, area.y, FONT, dim);
+	DrawText("name", name_x, area.y, FONT, dim);
+	DrawText("cpu", percent_x, area.y, FONT, dim);
+
+	int rows = (area.height - ROW) / ROW;
+	for (int i = 0; i < snapshot->proc_count && i < rows; i++) {
+		const struct proc_stat *proc = &snapshot->procs[i];
+		float y = area.y + ROW * (i + 1);
+
+		DrawText(TextFormat("%d", proc->pid), area.x, y, FONT, dim);
+		DrawText(proc->comm, name_x, y, FONT, text);
+		draw_meter((Rectangle){ meter_x, y + 6, percent_x - meter_x - PAD, FONT - 10 }, proc->cpu / 100, 120, 0);
+		DrawText(TextFormat("%5.1f", proc->cpu), percent_x, y, FONT, text);
+	}
+}
