@@ -184,3 +184,62 @@ static void draw_processes(Rectangle box, const struct snapshot *snapshot)
 		DrawText(TextFormat("%5.1f", proc->cpu), percent_x, y, FONT, text);
 	}
 }
+
+static void draw_dashboard(const struct snapshot *snapshot, const struct history *history)
+{
+	float width = GetScreenWidth();
+	float height = GetScreenHeight();
+	float left_width = width * 0.42f;
+
+	Rectangle cpu = { PAD, GAP, width - 2 * PAD, height * 0.36f };
+	float top = cpu.y + cpu.height + GAP;
+	float rest = height - top - PAD;
+	float third = (rest - 2 * GAP) / 3;
+
+	Rectangle memory = { PAD, top, left_width, third };
+	Rectangle network = { PAD, top + third + GAP, left_width, third };
+	Rectangle disk = { PAD, top + 2 * (third + GAP), left_width, third };
+	Rectangle processes = { left_width + 2 * PAD, top, width - left_width - 3 * PAD, rest };
+
+	draw_cpu(cpu, snapshot, history);
+	draw_memory(memory, snapshot, history);
+	draw_traffic(network, "network", "download", history->net_rx, "upload", history->net_tx);
+	draw_traffic(disk, "disk", "read", history->disk_read, "write", history->disk_write);
+	draw_processes(processes, snapshot);
+}
+
+int main(void)
+{
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
+	InitWindow(1280, 820, "pulso");
+	SetWindowMinSize(900, 600);
+	SetTargetFPS(30);
+
+	struct snapshot snapshot = { 0 };
+	struct history history = { 0 };
+	unsigned int last_tick = 0;
+	double last_fetch = -1;
+	bool connected = false;
+
+	while (!WindowShouldClose()) {
+		if (GetTime() - last_fetch >= 0.25) {
+			last_fetch = GetTime();
+			connected = fetch(&snapshot);
+			if (connected && snapshot.tick != last_tick) {
+				last_tick = snapshot.tick;
+				record(&history, &snapshot);
+			}
+		}
+
+		BeginDrawing();
+		ClearBackground(background);
+		if (connected && last_tick)
+			draw_dashboard(&snapshot, &history);
+		else
+			DrawText("waiting for pulsod on " SOCKET_PATH, PAD * 2, PAD * 2, FONT, dim);
+		EndDrawing();
+	}
+
+	CloseWindow();
+	return 0;
+}
